@@ -83,38 +83,65 @@ const handleMutations: MutationCallback = (mutationsList, observer) => {
       mutation.addedNodes.forEach((node) => {
         // 只处理 Element 类型的节点
         if (node instanceof Element) {
-          // 检查节点本身或其后代是否可能是我们要找的弹窗
-          // 注意：这里直接检查节点本身，可以根据实际情况调整为检查更深层的后代
-          if (elementContainsKeywords(node, POPUP_KEYWORDS)) {
-            console.log('[AutoContinue] Potential popup detected:', node);
+          // 检查是新添加的节点本身，还是其子节点包含弹窗关键词
+          let potentialPopupMessageElement: Element | null = null;
 
-            // 尝试在检测到的弹窗内查找并点击按钮
-            if (findAndClickButton(node)) {
-              clickingInProgress = true;
-              console.log('[AutoContinue] Auto-click initiated.');
-              // 设置防抖，防止立即再次触发
-              setTimeout(() => {
-                clickingInProgress = false;
-                console.log('[AutoContinue] Ready for next detection.');
-              }, CLICK_DEBOUNCE_MS);
-              // 找到并点击后，可以停止检查本次 mutation 中的其他节点（可选优化）
-              return;
+          if (elementContainsKeywords(node, POPUP_KEYWORDS)) {
+             potentialPopupMessageElement = node; // 节点本身包含关键词
+          } else {
+            // 检查节点的后代元素是否包含关键词
+            // 为了性能和准确性，遍历所有后代查找匹配项
+            const deepMatches = node.querySelectorAll('*');
+            for(const elem of deepMatches) {
+              if (elementContainsKeywords(elem, POPUP_KEYWORDS)) {
+                potentialPopupMessageElement = elem;
+                break; // 找到第一个匹配的后代
+              }
             }
           }
-          // (可选) 如果弹窗可能嵌套在更深层，需要递归检查 node 的子元素
-          // else {
-          //   const potentialPopups = node.querySelectorAll('*'); // 查找所有后代元素
-          //   for (const potentialPopup of potentialPopups) {
-          //      if (elementContainsKeywords(potentialPopup, POPUP_KEYWORDS)) {
-          //         console.log('[AutoContinue] Potential popup detected (deep scan):', potentialPopup);
-          //         if (findAndClickButton(potentialPopup)) {
-          //           clickingInProgress = true;
-          //           setTimeout(() => { clickingInProgress = false; }, CLICK_DEBOUNCE_MS);
-          //           return;
-          //         }
-          //      }
-          //   }
-          // }
+
+
+          // 如果找到了包含关键词的元素
+          if (potentialPopupMessageElement) {
+            console.log('[AutoContinue] Potential popup message detected within:', potentialPopupMessageElement);
+
+            // --- 关键改动：向上查找弹窗容器 ---
+            // 尝试查找最近的、看起来像弹窗容器的父元素
+            // '.el-message-box' 是根据日志猜测的 Element UI 类名
+            // '[role="dialog"]' 是通用的可访问性属性
+            // 可以根据需要添加更多常见的 modal/dialog 类名
+            const popupContainer = potentialPopupMessageElement.closest('.el-message-box, [role="dialog"], .modal, .dialog-wrapper');
+
+            if (popupContainer) {
+               console.log('[AutoContinue] Found potential popup container:', popupContainer);
+               // 在找到的容器内查找并点击按钮
+               if (findAndClickButton(popupContainer)) {
+                 clickingInProgress = true;
+                 console.log('[AutoContinue] Auto-click initiated.');
+                 // 设置防抖，防止立即再次触发
+                 setTimeout(() => {
+                   clickingInProgress = false;
+                   console.log('[AutoContinue] Ready for next detection.');
+                 }, CLICK_DEBOUNCE_MS);
+                 // 找到并点击后，可以停止检查本次 mutation 中的其他节点
+                 return;
+               } else {
+                  console.warn('[AutoContinue] Popup container found, but no confirmation button was clicked within it.');
+               }
+            } else {
+              console.warn('[AutoContinue] Popup message found, but failed to identify a suitable parent container (like .el-message-box or [role="dialog"]). Will attempt to click within the message element itself as a fallback (less likely to succeed).');
+              // Fallback: 尝试在原始检测到的元素内点击（成功率较低）
+              if (findAndClickButton(potentialPopupMessageElement)) {
+                  clickingInProgress = true;
+                  console.log('[AutoContinue] Auto-click initiated (fallback).');
+                  setTimeout(() => {
+                    clickingInProgress = false;
+                    console.log('[AutoContinue] Ready for next detection (fallback).');
+                  }, CLICK_DEBOUNCE_MS);
+                  return;
+              }
+            }
+          }
         }
       });
     }
